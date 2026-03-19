@@ -1,174 +1,52 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Volume2, Search, ListMusic, Heart as HeartIcon, Music, Loader2 } from 'lucide-react';
+import React from 'react';
+import { Play, Pause, SkipForward, SkipBack, Heart as HeartIcon, Music } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore';
-import YouTube from 'react-youtube';
 import { useParams } from 'react-router-dom';
 import SongLyrics from './SongLyrics';
 
 export default function RoomPlayer({ isHost }) {
   const { id: roomId } = useParams();
-  const { room, socket } = useRoomStore();
-  const [currentSong, setCurrentSong] = useState(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [pendingState, setPendingState] = useState(null);
-  
+  const { 
+    room, 
+    socket, 
+    currentSong, 
+    isPlaying, 
+    progress, 
+    setIsPlaying, 
+    setCurrentSong 
+  } = useRoomStore();
+
   const hasSong = !!currentSong;
-  const syncDataRef = useRef({ currentTime: 0, updatedAt: 0 });
-  const playerRef = useRef(null);
-
-  useEffect(() => {
-    if (!socket) return;
-    
-    const onSyncPlay = ({ currentTime, updatedAt }) => {
-      syncDataRef.current = { currentTime, updatedAt };
-      if (!playerRef.current) return;
-      setIsPlaying(true);
-      const delay = (Date.now() - updatedAt) / 1000;
-      playerRef.current.seekTo(currentTime + delay, true);
-      playerRef.current.playVideo();
-    };
-    
-    const onSyncPause = ({ currentTime, updatedAt }) => {
-      syncDataRef.current = { currentTime, updatedAt };
-      if (!playerRef.current) return;
-      setIsPlaying(false);
-      playerRef.current.pauseVideo();
-    };
-    
-    const onSyncSeek = ({ currentTime, updatedAt }) => {
-      syncDataRef.current = { currentTime, updatedAt };
-      if (!playerRef.current) return;
-      const delay = (Date.now() - updatedAt) / 1000;
-      playerRef.current.seekTo(currentTime + delay, true);
-      setProgress(currentTime + delay);
-    };
-    
-    const onSyncSong = (song) => {
-      syncDataRef.current = { currentTime: 0, updatedAt: Date.now() };
-      setCurrentSong(song);
-      setIsPlaying(true);
-      if (playerRef.current) {
-        playerRef.current.loadVideoById(song.videoId || song.id);
-        playerRef.current.playVideo();
-      }
-    };
-    
-    const onSyncState = (state) => {
-      if (!state.song) return;
-      syncDataRef.current = { currentTime: state.currentTime, updatedAt: state.updatedAt };
-      setCurrentSong(state.song);
-      setIsPlaying(state.isPlaying);
-      if (playerRef.current) {
-        playerRef.current.loadVideoById(state.song.videoId || state.song.id);
-        const delay = (Date.now() - state.updatedAt) / 1000;
-        playerRef.current.seekTo(state.currentTime + delay, true);
-        if (state.isPlaying) playerRef.current.playVideo();
-        else playerRef.current.pauseVideo();
-      } else {
-        setPendingState(state);
-      }
-    };
-
-    socket.on('sync-play', onSyncPlay);
-    socket.on('sync-pause', onSyncPause);
-    socket.on('sync-seek', onSyncSeek);
-    socket.on('sync-song', onSyncSong);
-    socket.on('sync-state', onSyncState);
-
-    return () => {
-      socket.off('sync-play', onSyncPlay);
-      socket.off('sync-pause', onSyncPause);
-      socket.off('sync-seek', onSyncSeek);
-      socket.off('sync-song', onSyncSong);
-      socket.off('sync-state', onSyncState);
-    };
-  }, [socket]);
-
-  // Progress Bar Updater (Local UI only, runs every 1 second)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isPlaying || !playerRef.current) return;
-      const current = playerRef.current.getCurrentTime();
-      if (current) {
-        setProgress(current);
-        setDuration(playerRef.current.getDuration());
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isPlaying]);
-
-  // Anti-desync loop (Drift correction every 10 seconds)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!isPlaying || !playerRef.current || !hasSong) return;
-      const { currentTime, updatedAt } = syncDataRef.current;
-      if (updatedAt === 0) return;
-      
-      const expectedTime = currentTime + (Date.now() - updatedAt) / 1000;
-      const actualTime = playerRef.current.getCurrentTime();
-      
-      // Increase drift threshold to 3.0 seconds to avoid micro-stuttering/lag
-      if (Math.abs(expectedTime - actualTime) > 3.0) {
-        console.log(`Drift corrected! Expected: ${expectedTime}, Actual: ${actualTime}`);
-        playerRef.current.seekTo(expectedTime, true);
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [isPlaying, hasSong]);
-
-  const onPlayerReady = (event) => {
-    playerRef.current = event.target;
-    if (pendingState) {
-      playerRef.current.loadVideoById(pendingState.song.videoId || pendingState.song.id);
-      const delay = (Date.now() - pendingState.updatedAt) / 1000;
-      playerRef.current.seekTo(pendingState.currentTime + delay, true);
-      if (pendingState.isPlaying) playerRef.current.playVideo();
-      else playerRef.current.pauseVideo();
-      setPendingState(null);
-    }
-  };
+  // Note: duration is calculated from the store or from the song object if available
+  const duration = currentSong?.durationMs ? currentSong.durationMs / 1000 : 0;
 
   const togglePlay = () => {
-    if (!playerRef.current || !currentSong) return;
-    const currentTime = playerRef.current.getCurrentTime();
+    if (!currentSong) return;
     if (isPlaying) {
       setIsPlaying(false);
-      playerRef.current.pauseVideo();
-      socket.emit('pause', { roomId, currentTime });
+      socket.emit('pause', { roomId, currentTime: progress });
     } else {
       setIsPlaying(true);
-      playerRef.current.playVideo();
-      socket.emit('play', { roomId, currentTime });
+      socket.emit('play', { roomId, currentTime: progress });
     }
   };
 
   const handleSeek = (e) => {
-    if (!playerRef.current || !currentSong) return;
+    if (!currentSong) return;
     const newTime = parseFloat(e.target.value);
-    setProgress(newTime);
-    playerRef.current.seekTo(newTime, true);
+    // Optimistic update
     socket.emit('seek', { roomId, currentTime: newTime });
   };
 
   const playNext = () => {
     if (room?.queue?.length > 0) {
-      playSong(room.queue[0]);
+      socket.emit('change-song', { roomId, song: room.queue[0] });
     }
   };
 
   const playPrevious = () => {
-    // Current implementation just restarts the song as we don't track history.
-    if (playerRef.current) {
-      playerRef.current.seekTo(0, true);
-      setProgress(0);
-      socket.emit('seek', { roomId, currentTime: 0 });
-    }
-  };
-
-  const playSong = (song) => {
-    socket.emit('change-song', { roomId, song });
+    // Current implementation just restarts the song
+    socket.emit('seek', { roomId, currentTime: 0 });
   };
 
   const formatTime = (secs) => {
@@ -178,34 +56,6 @@ export default function RoomPlayer({ isHost }) {
     const s = totalSeconds % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
-
-  useEffect(() => {
-    if (!currentSong) return;
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentSong.title || 'Unknown Title',
-        artist: currentSong.artist || 'Unknown Artist',
-        artwork: [{ src: currentSong.thumbnail || '', sizes: '512x512', type: 'image/jpeg' }]
-      });
-
-      navigator.mediaSession.setActionHandler('play', () => {
-        if (!playerRef.current) return;
-        setIsPlaying(true);
-        playerRef.current.playVideo();
-        socket.emit('play', { roomId, currentTime: playerRef.current.getCurrentTime() });
-      });
-
-      navigator.mediaSession.setActionHandler('pause', () => {
-        if (!playerRef.current) return;
-        setIsPlaying(false);
-        playerRef.current.pauseVideo();
-        socket.emit('pause', { roomId, currentTime: playerRef.current.getCurrentTime() });
-      });
-
-      navigator.mediaSession.setActionHandler('previoustrack', playPrevious);
-      navigator.mediaSession.setActionHandler('nexttrack', playNext);
-    }
-  }, [currentSong]);
 
   return (
     <div className="bg-black/40 rounded-3xl border border-white/10 backdrop-blur-xl p-6 relative overflow-hidden flex flex-col">
@@ -220,7 +70,7 @@ export default function RoomPlayer({ isHost }) {
       )}
 
       <div className="relative z-10 flex flex-col md:flex-row gap-6 md:gap-10 items-center md:items-start w-full">
-        {/* Album Art Container / Hidden Player */}
+        {/* Album Art Container */}
         <div className="w-48 h-48 sm:w-64 sm:h-64 rounded-2xl bg-zinc-800 shadow-2xl overflow-hidden flex-shrink-0 relative group">
           {hasSong && currentSong.thumbnail ? (
             <img src={currentSong.thumbnail} alt="thumbnail" className="w-full h-full object-cover" />
@@ -234,16 +84,6 @@ export default function RoomPlayer({ isHost }) {
           {isPlaying && (
             <div className="absolute inset-0 border-4 border-pink-500/30 rounded-2xl heartbeat-pulse pointer-events-none" />
           )}
-
-          {/* Hidden YouTube Player */}
-          <div className="hidden">
-            <YouTube
-              videoId={currentSong?.videoId || currentSong?.id || ''}
-              opts={{ playerVars: { autoplay: 0, controls: 0 } }}
-              onReady={onPlayerReady}
-              onEnd={playNext}
-            />
-          </div>
         </div>
 
         {/* Track Info & Controls */}
@@ -310,7 +150,7 @@ export default function RoomPlayer({ isHost }) {
 
             {/* Music Badge */}
             <div className="ml-auto hidden sm:flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 text-xs font-bold tracking-wide">
-              <span>YT AUDIO</span>
+              <span>SYNC HI-FI</span>
             </div>
           </div>
         </div>

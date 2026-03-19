@@ -1,76 +1,74 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, memo } from 'react';
 import { Search, Play, Plus, Heart, Music, ListMusic, Loader2 } from 'lucide-react';
 import { useRoomStore } from '../store/useRoomStore';
+import { useQuery } from '@tanstack/react-query';
+
+const SongItem = memo(({ song, isQueue, onPlay, onAdd, onToggleFav, isFav }) => (
+  <div className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg group transition-colors">
+    <div className="relative w-12 h-12 rounded-md overflow-hidden flex-shrink-0 cursor-pointer" onClick={() => onPlay(song)}>
+      <img src={song.thumbnail} alt={song.title} className="w-full h-full object-cover" />
+      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <Play className="w-5 h-5 text-white fill-current" />
+      </div>
+    </div>
+    <div className="flex-1 min-w-0">
+      <h4 className="text-sm font-medium text-white truncate">{song.title}</h4>
+      <p className="text-xs text-zinc-400 truncate">{song.artist}</p>
+    </div>
+    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      <button onClick={() => onToggleFav(song)} className="text-zinc-400 hover:text-pink-400 p-1">
+        <Heart className={`w-4 h-4 ${isFav ? 'fill-pink-400 text-pink-400' : ''}`} />
+      </button>
+      <button onClick={() => onAdd(song)} className="text-zinc-400 hover:text-white p-1">
+        <Plus className="w-4 h-4" />
+      </button>
+    </div>
+  </div>
+));
 
 export default function MusicSearch() {
-  const { room, socket, updateRoomQueue, updateRoomFavorites } = useRoomStore();
+  const { room, socket } = useRoomStore();
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('search'); // search, queue, favorites
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('search');
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    
-    setLoading(true);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/music/search?q=${encodeURIComponent(query)}`);
+  const { data: results = [], isLoading: loading } = useQuery({
+    queryKey: ['music-search', searchTerm],
+    queryFn: async () => {
+      if (!searchTerm) return [];
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:5001'}/api/music/search?q=${encodeURIComponent(searchTerm)}`);
       const data = await res.json();
-      setResults(data.results || []);
-    } catch (error) {
-      console.error('Failed to search:', error);
-    }
-    setLoading(false);
+      return data.results || [];
+    },
+    enabled: !!searchTerm,
+  });
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearchTerm(query.trim());
   };
 
   const playSong = (song) => {
-    if (!room?.roomId) return;
-    socket.emit('change-song', {
-      roomId: room.roomId,
-      song
-    });
+    if (!room?.id) return;
+    socket.emit('change-song', { roomId: room.id, song });
   };
 
   const addToQueue = (song) => {
-    if (!room?.roomId) return;
-    socket.emit('add_to_queue', song);
+    if (!room?.id) return;
+    socket.emit('add_to_queue', { roomId: room.id, song });
   };
 
   const toggleFavorite = (song) => {
-    socket.emit('toggle_favorite', song);
+    if (!room?.id) return;
+    socket.emit('toggle_favorite', { roomId: room.id, song });
   };
 
   const isFavorite = (videoId) => {
     return room?.favorites?.some(s => s.videoId === videoId);
   };
 
-  const renderSongItem = (song, isQueue = false) => (
-    <div key={song.videoId + (isQueue ? Math.random() : '')} className="flex items-center gap-3 p-2 hover:bg-white/5 rounded-lg group transition-colors">
-      <div className="relative w-12 h-12 rounded-md overflow-hidden flex-shrink-0 cursor-pointer" onClick={() => playSong(song)}>
-        <img src={song.thumbnail} alt={song.title} className="w-full h-full object-cover" />
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <Play className="w-5 h-5 text-white fill-current" />
-        </div>
-      </div>
-      <div className="flex-1 min-w-0">
-        <h4 className="text-sm font-medium text-white truncate">{song.title}</h4>
-        <p className="text-xs text-zinc-400 truncate">{song.artist}</p>
-      </div>
-      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={() => toggleFavorite(song)} className="text-zinc-400 hover:text-pink-400 p-1">
-          <Heart className={`w-4 h-4 ${isFavorite(song.videoId) ? 'fill-pink-400 text-pink-400' : ''}`} />
-        </button>
-        <button onClick={() => addToQueue(song)} className="text-zinc-400 hover:text-white p-1">
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  );
-
   return (
     <div className="flex flex-col h-full bg-black/40 rounded-3xl border border-white/10 backdrop-blur-xl overflow-hidden">
-      {/* Tabs */}
       <div className="flex gap-4 p-4 border-b border-white/5 bg-black/20">
         <button 
           onClick={() => setActiveTab('search')}
@@ -112,7 +110,16 @@ export default function MusicSearch() {
                   <Loader2 className="w-6 h-6 text-pink-500 animate-spin" />
                 </div>
               ) : results.length > 0 ? (
-                results.map(song => renderSongItem(song))
+                results.map(song => (
+                  <SongItem 
+                    key={song.videoId} 
+                    song={song} 
+                    onPlay={playSong} 
+                    onAdd={addToQueue} 
+                    onToggleFav={toggleFavorite}
+                    isFav={isFavorite(song.videoId)}
+                  />
+                ))
               ) : (
                 <div className="text-center py-12 text-zinc-500 flex flex-col items-center gap-3">
                   <Music className="w-12 h-12 opacity-20" />
@@ -126,7 +133,17 @@ export default function MusicSearch() {
         {activeTab === 'queue' && (
           <div className="space-y-1">
             {room?.queue?.length > 0 ? (
-              room.queue.map(song => renderSongItem(song, true))
+              room.queue.map(song => (
+                <SongItem 
+                  key={song.videoId + Math.random()} 
+                  song={song} 
+                  isQueue 
+                  onPlay={playSong} 
+                  onAdd={addToQueue} 
+                  onToggleFav={toggleFavorite}
+                  isFav={isFavorite(song.videoId)}
+                />
+              ))
             ) : (
               <div className="text-center py-12 text-zinc-500">
                 <p className="text-sm">Queue is empty</p>
@@ -138,7 +155,16 @@ export default function MusicSearch() {
         {activeTab === 'favorites' && (
           <div className="space-y-1">
             {room?.favorites?.length > 0 ? (
-              room.favorites.map(song => renderSongItem(song))
+              room.favorites.map(song => (
+                <SongItem 
+                  key={song.videoId} 
+                  song={song} 
+                  onPlay={playSong} 
+                  onAdd={addToQueue} 
+                  onToggleFav={toggleFavorite}
+                  isFav={isFavorite(song.videoId)}
+                />
+              ))
             ) : (
               <div className="text-center py-12 text-zinc-500">
                 <p className="text-sm">No favorite songs yet</p>

@@ -3,7 +3,19 @@ import { create } from 'zustand';
 export const useRoomStore = create((set) => ({
   room: null,
   socket: null,
-  playerState: null,
+  // Sync & Timing
+  latency: 0,
+  serverOffset: 0,
+  
+  // Playback State
+  isPlaying: false,
+  volume: 1,
+  progress: 0,
+  currentSong: null,
+  queue: [],
+  members: [],
+
+  // UI State
   moodMode: 'normal',
   chatMessages: [],
   loveNotes: [],
@@ -13,15 +25,34 @@ export const useRoomStore = create((set) => ({
   isTyping: false,
   typingMsg: '',
   
-  setRoom: (room) => set({ room }),
+  setRoom: (room) => set({ 
+    room, 
+    queue: room?.queue || [], 
+    currentSong: room?.song || null,
+    members: room?.users || []
+  }),
   setSocket: (socket) => set({ socket }),
-  setPlayerState: (state) => set({ playerState: state }),
-  updateRoomQueue: (queue) => set((state) => ({ room: { ...state.room, queue } })),
+  setIsPlaying: (isPlaying) => set({ isPlaying }),
+  setVolume: (volume) => set({ volume }),
+  setProgress: (progress) => set({ progress }),
+  setCurrentSong: (currentSong) => set({ currentSong }),
+  setQueue: (queue) => set({ queue }),
+  setMembers: (members) => set({ members }),
+  setLatency: (latency) => set({ latency }),
+  
+  updateRoomQueue: (queue) => set((state) => ({ 
+    room: { ...state.room, queue },
+    queue
+  })),
   updateRoomFavorites: (favorites) => set((state) => ({ room: { ...state.room, favorites } })),
-  updateSong: (song) => set((state) => ({ room: state.room ? { ...state.room, song } : state.room })),
-  updateSongProgress: (progressMs) => set((state) => ({
+  updateSong: (song) => set((state) => ({ 
+    room: state.room ? { ...state.room, song } : state.room,
+    currentSong: song
+  })),
+  updateSongProgress: (progress) => set((state) => ({
+    progress,
     room: state.room && state.room.song 
-      ? { ...state.room, song: { ...state.room.song, progressMs } } 
+      ? { ...state.room, song: { ...state.room.song, progressMs: progress * 1000 } } 
       : state.room
   })),
   setMoodMode: (mood) => set({ moodMode: mood }),

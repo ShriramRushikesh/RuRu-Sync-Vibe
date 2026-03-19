@@ -1,13 +1,12 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, memo } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 import { Send, Heart, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function Chat({ username }) {
+const Chat = ({ username }) => {
   const [msg, setMsg] = useState('');
-  const { chatMessages, socket, room, isTyping, typingMsg } = useRoomStore();
+  const { chatMessages, socket, isTyping, typingMsg } = useRoomStore();
   const endRef = useRef();
-
   let typingTimeout = useRef(null);
 
   const handleTyping = (e) => {
@@ -17,11 +16,11 @@ export default function Chat({ username }) {
     const romanticDrafts = ['Thinking about you... 💭', 'Typing something dangerous 😈', 'Writing a love note... ✍️'];
     const selectedTypingMsg = romanticDrafts[Math.floor(Math.random() * romanticDrafts.length)];
     
-    socket.emit('typing', { isTyping: true, msg: selectedTypingMsg });
+    socket?.emit('typing', { isTyping: true, msg: selectedTypingMsg });
     
     clearTimeout(typingTimeout.current);
     typingTimeout.current = setTimeout(() => {
-      socket.emit('typing', { isTyping: false, msg: '' });
+      socket?.emit('typing', { isTyping: false, msg: '' });
     }, 2000);
   };
 
@@ -32,20 +31,20 @@ export default function Chat({ username }) {
     let isBlurred = msg.startsWith('*blur*');
     let finalMsg = isBlurred ? msg.slice(6).trim() : msg;
 
-    socket.emit('send_message', { text: finalMsg, isBlurred });
-    socket.emit('typing', { isTyping: false });
+    socket?.emit('send_message', { text: finalMsg, isBlurred });
+    socket?.emit('typing', { isTyping: false });
     
     setMsg('');
     setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
   const sendEmoji = (emoji) => {
-    socket.emit('send_emoji', { id: Date.now(), emoji, x: Math.random() * 80 + 10 });
+    socket?.emit('send_emoji', { id: Date.now(), emoji, x: Math.random() * 80 + 10 });
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-4 border-b border-white/5 flex justify-between items-center">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="p-4 border-b border-white/5 flex justify-between items-center bg-black/20">
         <h2 className="font-semibold text-zinc-200">Room Chat</h2>
         <div className="flex gap-2">
           {['❤️', '😍', '🔥'].map(em => (
@@ -56,7 +55,7 @@ export default function Chat({ username }) {
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
         {chatMessages.map((m, i) => {
           const isMe = m.sender === username;
           return (
@@ -65,11 +64,13 @@ export default function Chat({ username }) {
                 className={`max-w-[80%] rounded-3xl px-5 py-3 shadow-sm ${
                   isMe ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white rounded-tr-sm shadow-pink-500/20' 
                        : 'bg-white/10 text-white rounded-tl-sm backdrop-blur-md border border-white/5'
-                } ${m.message.isBlurred ? 'blur-sm hover:blur-none transition-all duration-300 cursor-pointer select-none' : ''}`}
-                title={m.message.isBlurred ? "Tap to reveal" : ""}
+                } ${m.message?.isBlurred ? 'blur-sm hover:blur-none transition-all duration-300 cursor-pointer select-none' : ''}`}
+                title={m.message?.isBlurred ? "Tap to reveal" : ""}
               >
                 {!isMe && <div className="text-[10px] text-pink-300/80 font-bold uppercase tracking-wider mb-1">{m.sender}</div>}
-                <p className="text-sm leading-relaxed break-words">{m.message.text || m.message}</p>
+                <p className="text-sm leading-relaxed break-words">
+                  {m.message?.text || (typeof m.message === 'string' ? m.message : '')}
+                </p>
               </div>
             </div>
           );
@@ -109,4 +110,6 @@ export default function Chat({ username }) {
       </div>
     </div>
   );
-}
+};
+
+export default memo(Chat);
