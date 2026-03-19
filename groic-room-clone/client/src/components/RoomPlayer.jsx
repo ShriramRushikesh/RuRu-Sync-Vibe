@@ -159,6 +159,7 @@ export default function RoomPlayer({ isHost }) {
   };
 
   const playPrevious = () => {
+    // Current implementation just restarts the song as we don't track history.
     if (playerRef.current) {
       playerRef.current.seekTo(0, true);
       setProgress(0);
@@ -240,6 +241,7 @@ export default function RoomPlayer({ isHost }) {
               videoId={currentSong?.videoId || currentSong?.id || ''}
               opts={{ playerVars: { autoplay: 0, controls: 0 } }}
               onReady={onPlayerReady}
+              onEnd={playNext}
             />
           </div>
         </div>

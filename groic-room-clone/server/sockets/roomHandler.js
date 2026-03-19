@@ -92,6 +92,12 @@ module.exports = (io, socket) => {
     socket.on('change-song', ({ roomId, song }) => {
       const room = rooms[roomId];
       if (room) {
+        // If the song being played is the first one in the queue, remove it
+        if (room.queue.length > 0 && (room.queue[0].videoId === song.videoId || room.queue[0].id === song.id)) {
+          room.queue.shift();
+          io.to(roomId).emit('queue_updated', room.queue);
+        }
+        
         room.song = song;
         room.currentTime = 0;
         room.isPlaying = true;

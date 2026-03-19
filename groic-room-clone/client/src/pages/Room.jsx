@@ -8,7 +8,7 @@ import CoupleFeatures from '../components/CoupleFeatures';
 import LoveNotes from '../components/LoveNotes';
 import Logo from '../components/Logo';
 import MusicSearch from '../components/MusicSearch';
-import { Share2, Users } from 'lucide-react';
+import { Share2, Users, MessageCircle, Instagram } from 'lucide-react';
 
 export default function Room() {
   const { id } = useParams();
@@ -61,6 +61,20 @@ export default function Room() {
     return () => newSocket.disconnect();
   }, [id, state, navigate]);
 
+  const shareToWhatsApp = () => {
+    const text = `Join my RuRu Sync Room to vibing together! ❤️🎵\nLink: ${window.location.href}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const shareToInstagram = () => {
+    // Instagram doesn't have a direct "share to DM" URL like WhatsApp, 
+    // so we copy link and notify user to share it there.
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    alert('Link copied! You can now paste it in Instagram DMs.');
+  };
+
   if (!room) return <div className="min-h-screen flex items-center justify-center">Loading Vibes...</div>;
 
   const bgStyles = {
@@ -101,19 +115,35 @@ export default function Room() {
             <Users className="w-4 h-4" />
             <span className="text-sm font-medium">{room.users.length}{room.isCoupleMode ? '/2' : ''} Users</span>
           </div>
-          <button 
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-            className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full transition-all text-sm font-medium w-44"
-          >
-            <Share2 className="w-4 h-4" />
-            {copied ? 'Copied!' : `Invite Code: ${id}`}
-          </button>
-        </div>
-      </header>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={shareToWhatsApp}
+                className="bg-[#25D366] hover:bg-[#20ba56] text-white p-2 rounded-full transition-all shadow-lg"
+                title="Share to WhatsApp"
+              >
+                <MessageCircle className="w-5 h-5 fill-current" />
+              </button>
+              <button 
+                onClick={shareToInstagram}
+                className="bg-gradient-to-tr from-[#f09433] via-[#dc2743] to-[#bc1888] text-white p-2 rounded-full transition-all shadow-lg"
+                title="Share to Instagram"
+              >
+                <Instagram className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+                className="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full transition-all text-sm font-medium w-40"
+              >
+                <Share2 className="w-4 h-4" />
+                {copied ? 'Copied!' : `Invite: ${id}`}
+              </button>
+            </div>
+          </div>
+        </header>
 
       <main className="max-w-[1600px] mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-140px)] lg:h-[calc(100vh-80px)]">
         <div className={`${mobileTab === 'player' || mobileTab === 'extras' ? 'flex' : 'hidden'} lg:flex lg:col-span-2 flex-col gap-6 overflow-y-auto pb-4 custom-scrollbar`}>
