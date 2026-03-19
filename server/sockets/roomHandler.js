@@ -33,16 +33,28 @@ module.exports = (io, socket) => {
 
     io.to(roomId).emit('room_update', room);
 
+    // Calculate precision sync state for joiner
+    const now = Date.now();
+    let currentPos = room.currentTime;
+    if (room.isPlaying) {
+      currentPos += (now - room.updatedAt) / 1000;
+    }
+
     socket.emit('sync-state', {
       song: room.song,
       isPlaying: room.isPlaying,
-      currentTime: room.currentTime,
-      updatedAt: room.updatedAt
+      currentTime: currentPos,
+      serverTime: now // Provide server timestamp for RTT calculation
     });
     
     // Heartbeat Sync
     socket.on('heartbeat', (data) => {
       socket.to(roomId).emit('partner_heartbeat', data);
+    });
+
+    // Latency Measurement (Ping-Pong)
+    socket.on('ping-sync', (timestamp) => {
+      socket.emit('pong-sync', { timestamp, serverTime: Date.now() });
     });
 
     // Voice Reactions
