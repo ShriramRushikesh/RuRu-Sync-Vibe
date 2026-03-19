@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: ruru-backend
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLIENT_URL
+        value: https://client-eosin-ten.vercel.app
