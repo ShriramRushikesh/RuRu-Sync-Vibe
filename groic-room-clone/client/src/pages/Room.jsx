@@ -107,7 +107,7 @@ export default function Room() {
             <Logo className="h-10 w-auto text-pink-400 drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]" />
             <span className="text-zinc-600 hidden sm:inline-block">|</span>
             <span className="text-sm font-medium bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent hidden sm:inline-block">
-              {room.isCoupleMode ? 'Our Space 🕊️💕' : 'Vibes Room'}
+              RuRu | sync vibes {room.isCoupleMode ? '🕊️💕' : ''}
             </span>
           </div>
         <div className="flex items-center gap-4">

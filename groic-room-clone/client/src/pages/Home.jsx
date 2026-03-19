@@ -36,10 +36,11 @@ export default function Home() {
       >
         <div className="text-center mb-8 relative">
           <div className="flex justify-center mb-6">
+            <h1 className="sr-only">RuRu | sync vibes everywhere</h1>
             <Logo className="w-56 h-auto text-pink-500 drop-shadow-[0_0_15px_rgba(236,72,153,0.5)]" />
           </div>
           <p className="text-zinc-400 text-lg mb-8 max-w-md mx-auto">
-            A premium space for two. Connect, listen, and feel the vibe together.
+            RuRu | Synchronize vibes everywhere. Connect, listen, and feel the music together.
           </p>
         </div>
 
@@ -109,9 +110,16 @@ export default function Home() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.5 }}
-        className="absolute bottom-6 text-center text-zinc-500 text-sm w-full left-0 font-medium"
+        className="absolute bottom-6 text-center w-full left-0 space-y-2 px-4"
       >
-        Made with <Heart className="inline-block w-4 h-4 text-pink-500 mx-1 animate-pulse" /> for <span className="text-zinc-300">Paroo</span>, by <span className="text-zinc-300">Rushi</span>
+        <div className="text-zinc-500 text-sm font-medium">
+          Made with <Heart className="inline-block w-4 h-4 text-pink-500 mx-1 animate-pulse" /> for <span className="text-zinc-300">Paroo</span>, by <span className="text-zinc-300">Rushi</span>
+        </div>
+        <p className="text-[10px] text-zinc-600 max-w-lg mx-auto leading-relaxed">
+          RuRu is a personal synchronization tool. We do not host, store, or distribute any copyrighted music content. 
+          All audio is streamed directly from public third-party APIs. Please respect the copyright of the content creators 
+          and comply with your local government regulations.
+        </p>
       </motion.div>
     </div>
   );

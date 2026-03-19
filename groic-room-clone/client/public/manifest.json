@@ -1,0 +1,15 @@
+{
+  "short_name": "RuRu",
+  "name": "RuRu | sync vibes everywhere",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#ec4899",
+  "background_color": "#09090b"
+}
