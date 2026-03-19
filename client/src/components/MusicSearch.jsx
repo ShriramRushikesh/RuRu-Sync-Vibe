@@ -49,18 +49,21 @@ export default function MusicSearch() {
   };
 
   const playSong = (song) => {
-    if (!room?.id) return;
-    socket.emit('change-song', { roomId: room.id, song });
+    const roomId = room?.roomId;
+    if (!roomId || !socket) return;
+    socket.emit('change-song', { roomId, song });
   };
 
   const addToQueue = (song) => {
-    if (!room?.id) return;
-    socket.emit('add_to_queue', { roomId: room.id, song });
+    if (!room?.roomId || !socket) return;
+    // Server handler listens for bare `song` argument
+    socket.emit('add_to_queue', song);
   };
 
   const toggleFavorite = (song) => {
-    if (!room?.id) return;
-    socket.emit('toggle_favorite', { roomId: room.id, song });
+    const roomId = room?.roomId;
+    if (!roomId || !socket) return;
+    socket.emit('toggle_favorite', { roomId, song });
   };
 
   const isFavorite = (videoId) => {
