@@ -2,138 +2,140 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import { useRoomStore } from '../store/useRoomStore';
 import YouTube from 'react-youtube';
 
-// Singleton refs outside React lifecycle — never recreated
-const _playerRef = { current: null };
-const _syncData = { currentTime: 0, updatedAt: 0, serverOffset: 0 };
-let _rafId = null;
-let _isPlaying = false;
-let _currentSongId = null;
+// ─── Singleton Audio Engine ──────────────────────────────────────────────────
+const _p = { ref: null };                   // player ref
+const _s = { time: 0, at: 0, offset: 0 };  // sync state (server-authoritative)
+let _raf = null;
+let _ticker = null;
+let _started = false; // whether user has ever explicitly played (gesture unlock)
 
-// Internal RAF loop — runs 60fps but NEVER calls React setState
-function startSyncLoop() {
-  if (_rafId) cancelAnimationFrame(_rafId);
-  
-  function loop() {
-    const player = _playerRef.current;
-    if (player && _isPlaying && _syncData.updatedAt > 0) {
-      const now = Date.now() + _syncData.serverOffset;
-      const expectedTime = _syncData.currentTime + (now - _syncData.updatedAt) / 1000;
-      try {
-        const actualTime = player.getCurrentTime();
-        if (Math.abs(expectedTime - actualTime) > 0.1) {
-          player.seekTo(expectedTime, true);
-        }
-      } catch (e) { /* player not ready yet */ }
-    }
-    _rafId = requestAnimationFrame(loop);
-  }
-  _rafId = requestAnimationFrame(loop);
+// Exported for RoomPlayer to call DIRECTLY inside gesture handlers (mobile unlock)
+export const audioEngine = {
+  // Called inside tap → unlocks autoplay policy on mobile
+  play() {
+    _started = true;
+    try {
+      _p.ref?.unMute();
+      _p.ref?.setVolume(100);
+      _p.ref?.playVideo();
+    } catch (_) {}
+  },
+  pause() {
+    try { _p.ref?.pauseVideo(); } catch (_) {}
+  },
+  seek(t) {
+    try { _p.ref?.seekTo(t, true); } catch (_) {}
+  },
+};
+
+// Server clock → client clock conversion
+function serverNow() { return Date.now() + _s.offset; }
+
+// Expected playback position right now
+function expectedTime() {
+  if (!_s.at) return _s.time;
+  return _s.time + (serverNow() - _s.at) / 1000;
 }
 
-// Progress is reported to Zustand only once per second (not 60x/sec)
-let _progressInterval = null;
-function startProgressReporting(setProgress) {
-  if (_progressInterval) clearInterval(_progressInterval);
-  _progressInterval = setInterval(() => {
-    if (_playerRef.current && _isPlaying) {
+function startEngine(setProgress, isPlayingRef) {
+  if (_raf) cancelAnimationFrame(_raf);
+  if (_ticker) clearInterval(_ticker);
+
+  // 60fps drift correction — pure JS, ZERO React re-renders
+  function loop() {
+    if (_p.ref && isPlayingRef.current && _s.at) {
       try {
-        setProgress(_playerRef.current.getCurrentTime());
-      } catch (e) {}
+        const drift = _p.ref.getCurrentTime() - expectedTime();
+        if (Math.abs(drift) > 0.15) {
+          _p.ref.seekTo(expectedTime(), true);
+        }
+      } catch (_) {}
     }
+    _raf = requestAnimationFrame(loop);
+  }
+  _raf = requestAnimationFrame(loop);
+
+  // Progress to Zustand once/sec — not 60x/sec
+  _ticker = setInterval(() => {
+    try {
+      if (_p.ref && isPlayingRef.current) setProgress(_p.ref.getCurrentTime());
+    } catch (_) {}
   }, 1000);
 }
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * GlobalAudioPlayer: Audio engine that runs outside React lifecycle.
- * React lifecycle only handles initialization — sync runs in a pure JS loop.
- */
 export default function GlobalAudioPlayer() {
   const {
-    currentSong,
-    isPlaying,
-    volume,
-    setProgress,
-    setIsPlaying,
-    setCurrentSong,
-    setLatency,
-    socket,
-    room,
-    queue,
+    currentSong, isPlaying, volume,
+    setProgress, setIsPlaying, setCurrentSong, setLatency,
+    socket, room, queue,
   } = useRoomStore();
 
-  const roomId = room?.id || room?.roomId;
+  const roomId = room?.roomId || room?.id;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
 
-  // Keep module-level vars in sync with Zustand state (no re-renders caused)
-  _isPlaying = isPlaying;
-
-  // Start the sync loop and progress reporter once on mount — never restart
   useEffect(() => {
-    startSyncLoop();
-    startProgressReporting(setProgress);
-    return () => {
-      if (_rafId) cancelAnimationFrame(_rafId);
-      if (_progressInterval) clearInterval(_progressInterval);
-    };
-  }, []); // Empty deps — runs once only
+    startEngine(setProgress, isPlayingRef);
+    return () => { cancelAnimationFrame(_raf); clearInterval(_ticker); };
+  }, []);
 
-  // 1. Latency Measurement (Ping-Pong)
+  // Latency measurement — runs every 5s
   useEffect(() => {
     if (!socket) return;
-    const interval = setInterval(() => socket.emit('ping-sync', Date.now()), 5000);
+    const iv = setInterval(() => socket.emit('ping-sync', Date.now()), 5000);
     const onPong = ({ timestamp, serverTime }) => {
-      const now = Date.now();
-      const rtt = now - timestamp;
-      _syncData.serverOffset = serverTime - (now - rtt / 2);
+      const rtt = Date.now() - timestamp;
+      _s.offset = serverTime - (Date.now() - rtt / 2);
       setLatency(rtt);
     };
     socket.on('pong-sync', onPong);
-    return () => {
-      clearInterval(interval);
-      socket.off('pong-sync', onPong);
-    };
+    return () => { clearInterval(iv); socket.off('pong-sync', onPong); };
   }, [socket]);
 
-  // 2. Socket Sync Listeners — update module-level data directly (no re-render)
+  // Socket sync listeners — all use serverTime for clock alignment
   useEffect(() => {
     if (!socket) return;
 
-    const onSyncPlay = ({ currentTime, updatedAt }) => {
-      _syncData.currentTime = currentTime;
-      _syncData.updatedAt = updatedAt;
-      _isPlaying = true;
+    const onSyncPlay = ({ currentTime, serverTime }) => {
+      _s.time = currentTime;
+      _s.at = serverTime || Date.now(); // use server's clock, not client's
       setIsPlaying(true);
+      // Start playing (for users receiving from another user's action)
+      try { _p.ref?.unMute(); _p.ref?.setVolume(100); _p.ref?.playVideo(); } catch (_) {}
     };
 
-    const onSyncPause = ({ currentTime, updatedAt }) => {
-      _syncData.currentTime = currentTime;
-      _syncData.updatedAt = updatedAt;
-      _isPlaying = false;
+    const onSyncPause = ({ currentTime, serverTime }) => {
+      _s.time = currentTime;
+      _s.at = serverTime || Date.now();
       setIsPlaying(false);
+      try { _p.ref?.pauseVideo(); } catch (_) {}
     };
 
-    const onSyncSeek = ({ currentTime, updatedAt }) => {
-      _syncData.currentTime = currentTime;
-      _syncData.updatedAt = updatedAt;
-      // RAF loop corrects audio automatically — no setState needed
+    const onSyncSeek = ({ currentTime, serverTime }) => {
+      _s.time = currentTime;
+      _s.at = serverTime || Date.now();
+      // RAF loop corrects drift; explicit seek for precision
+      try { _p.ref?.seekTo(currentTime, true); } catch (_) {}
     };
 
-    const onSyncSong = (song) => {
-      _syncData.currentTime = 0;
-      _syncData.updatedAt = Date.now();
-      _isPlaying = true;
-      setCurrentSong(song);    // triggers YouTube to load new video
+    const onSyncSong = ({ song, serverTime }) => {
+      // Handle both formats: old `song` directly, new `{song, serverTime}`
+      const s = song?.videoId ? song : song;
+      _s.time = 0;
+      _s.at = serverTime || Date.now();
+      setCurrentSong(s);
       setIsPlaying(true);
     };
 
-    // Late join: arrive at the right second without pausing/restarting
     const onSyncState = (state) => {
       if (!state.song) return;
-      const rtt = Date.now() - (state.serverTime || Date.now());
-      _syncData.currentTime = state.currentTime + rtt / 2000; // pre-compensate RTT
-      _syncData.updatedAt = Date.now();
-      _isPlaying = state.isPlaying;
+      // Calculate correct position using server's timestamp
+      const serverNowMs = state.serverTime || Date.now();
+      _s.time = state.currentTime;
+      _s.at = serverNowMs;
       setCurrentSong(state.song);
       setIsPlaying(state.isPlaying);
     };
@@ -143,7 +145,6 @@ export default function GlobalAudioPlayer() {
     socket.on('sync-seek', onSyncSeek);
     socket.on('sync-song', onSyncSong);
     socket.on('sync-state', onSyncState);
-
     return () => {
       socket.off('sync-play', onSyncPlay);
       socket.off('sync-pause', onSyncPause);
@@ -153,7 +154,7 @@ export default function GlobalAudioPlayer() {
     };
   }, [socket]);
 
-  // 3. MediaSession API (Background Controls) — only re-run when song changes
+  // MediaSession
   useEffect(() => {
     if (!('mediaSession' in navigator) || !currentSong) return;
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -162,58 +163,76 @@ export default function GlobalAudioPlayer() {
       artwork: [{ src: currentSong.thumbnail, sizes: '512x512', type: 'image/png' }],
     });
     navigator.mediaSession.setActionHandler('play', () => {
-      setIsPlaying(true);
-      socket?.emit('play', { roomId, currentTime: _playerRef.current?.getCurrentTime() || 0 });
+      audioEngine.play(); setIsPlaying(true);
+      socket?.emit('play', { roomId, currentTime: _p.ref?.getCurrentTime() || 0 });
     });
     navigator.mediaSession.setActionHandler('pause', () => {
-      setIsPlaying(false);
-      socket?.emit('pause', { roomId, currentTime: _playerRef.current?.getCurrentTime() || 0 });
+      audioEngine.pause(); setIsPlaying(false);
+      socket?.emit('pause', { roomId, currentTime: _p.ref?.getCurrentTime() || 0 });
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => {
       if (queue?.length > 0) socket?.emit('change-song', { roomId, song: queue[0] });
     });
-  }, [currentSong?.videoId]);  // only re-run on actual song change, not on every render
+  }, [currentSong?.videoId]);
 
-  // 4. Player event handlers (stable refs — never cause re-renders)
   const onPlayerReady = useCallback((event) => {
-    _playerRef.current = event.target;
-    _playerRef.current.setVolume(volumeRef.current * 100);
-    // Instantly seek to corrected position when player is ready
-    if (_syncData.updatedAt > 0) {
-      const now = Date.now() + _syncData.serverOffset;
-      _playerRef.current.seekTo(_syncData.currentTime + (now - _syncData.updatedAt) / 1000, true);
+    _p.ref = event.target;
+    // Mobile: start MUTED so autoplay is allowed, then unmute only after user gesture
+    _p.ref.mute();
+    _p.ref.setVolume(0);
+
+    // Seek to where we should be
+    if (_s.at > 0) {
+      _p.ref.seekTo(Math.max(0, expectedTime()), true);
     }
-  }, []); // stable ref
+
+    if (isPlayingRef.current) {
+      // Play muted first (mobile-safe)
+      _p.ref.playVideo();
+
+      // If user has already interacted (gesture unlock established), unmute immediately
+      if (_started) {
+        setTimeout(() => {
+          try { _p.ref?.unMute(); _p.ref?.setVolume(volumeRef.current * 100); } catch (_) {}
+        }, 200);
+      }
+    }
+  }, []);
 
   const onStateChange = useCallback((event) => {
-    if (event.data === 1 && !_isPlaying) setIsPlaying(true);
-    if (event.data === 2 && _isPlaying) setIsPlaying(false);
+    if (event.data === 1 && !isPlayingRef.current) setIsPlaying(true);
+    if (event.data === 2 && isPlayingRef.current) setIsPlaying(false);
   }, []);
 
   const onEnd = useCallback(() => {
     if (queue?.length > 0) socket?.emit('change-song', { roomId, song: queue[0] });
   }, [queue, socket, roomId]);
 
-  // Always render the player container — even without a song (preloads the iframe)
   const nextSong = queue?.[0];
 
   return (
-    <div className="fixed bottom-0 left-0 w-0 h-0 overflow-hidden pointer-events-none opacity-0">
+    <div
+      aria-hidden="true"
+      style={{ position: 'fixed', bottom: 0, left: 0, width: 1, height: 1, opacity: 0.01, overflow: 'hidden', pointerEvents: 'none' }}
+    >
       {currentSong && (
         <YouTube
           key={currentSong.videoId || currentSong.id}
           videoId={currentSong.videoId || currentSong.id}
-          opts={{ playerVars: { autoplay: 1, controls: 0, modestbranding: 1, rel: 0 } }}
+          opts={{
+            width: '1', height: '1',
+            playerVars: { autoplay: 1, controls: 0, rel: 0, playsinline: 1, fs: 0, modestbranding: 1 },
+          }}
           onReady={onPlayerReady}
           onStateChange={onStateChange}
           onEnd={onEnd}
         />
       )}
-      {nextSong && (
+      {nextSong && nextSong.videoId !== currentSong?.videoId && (
         <YouTube
-          key={`preload-${nextSong.videoId || nextSong.id}`}
-          videoId={nextSong.videoId || nextSong.id}
-          opts={{ playerVars: { autoplay: 0, controls: 0, modestbranding: 1, rel: 0 } }}
+          key={`pre-${nextSong.videoId}`}
+          videoId={nextSong.videoId}
+          opts={{ width: '1', height: '1', playerVars: { autoplay: 0, controls: 0, rel: 0, playsinline: 1 } }}
         />
       )}
     </div>
